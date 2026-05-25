@@ -1,0 +1,42 @@
+[
+  {
+    "name": "Professional",
+    "prompt": "Rewrite the text in a formal, professional, and business-appropriate tone."
+  },
+  {
+    "name": "Casual",
+    "prompt": "Rewrite the text in a relaxed, friendly, and casual tone."
+  },
+  {
+    "name": "Enthusiastic",
+    "prompt": "Rewrite the text with high energy, enthusiasm, and positivity."
+  },
+  {
+    "name": "Empathetic",
+    "prompt": "Rewrite the text to sound warm, understanding, and empathetic."
+  },
+  {
+    "name": "Direct",
+    "prompt": "Rewrite the text to be extremely concise, direct, and to the point."
+  },
+  {
+    "name": "Humorous",
+    "prompt": "Rewrite the text to be funny, witty, and lighthearted."
+  },
+  {
+    "name": "Academic",
+    "prompt": "Rewrite the text in a scholarly, objective, and formal academic tone."
+  },
+  {
+    "name": "Persuasive",
+    "prompt": "Rewrite the text to be convincing, compelling, and persuasive."
+  },
+  {
+    "name": "Urgent",
+    "prompt": "Rewrite the text to convey a sense of urgency, importance, and immediate action."
+  },
+  {
+    "name": "Poetic",
+    "prompt": "Rewrite the text using poetic, evocative, and highly descriptive language."
+  }
+]

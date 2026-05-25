@@ -1,0 +1,8 @@
+[
+  { "id": "theme", "name": "Theme Appearance" },
+  { "id": "language", "name": "Language Selection" },
+  { "id": "shortcuts", "name": "Keyboard Shortcuts" },
+  { "id": "audio-device", "name": "Audio Input Device" },
+  { "id": "auto-punctuation", "name": "Auto Punctuation" },
+  { "id": "export-format", "name": "Default Export Format" }
+]

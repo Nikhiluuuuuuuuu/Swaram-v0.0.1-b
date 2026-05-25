@@ -1,0 +1,9 @@
+[
+  { "id": "dashboard", "label": "Dashboard", "icon": "layout-dashboard" },
+  { "id": "models", "label": "Models", "icon": "cpu" },
+  { "id": "dictionary", "label": "Dictionary", "icon": "book" },
+  { "id": "snippets", "label": "Snippets", "icon": "code" },
+  { "id": "tones", "label": "Tones", "icon": "music" },
+  { "id": "modes", "label": "Modes", "icon": "sliders" },
+  { "id": "settings", "label": "Settings", "icon": "settings" }
+]

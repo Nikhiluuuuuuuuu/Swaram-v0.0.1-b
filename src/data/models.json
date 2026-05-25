@@ -1,0 +1,5 @@
+[
+  { "id": "whisper-base-en", "name": "Whisper Base (English)", "size": "142 MB" },
+  { "id": "whisper-small-en", "name": "Whisper Small (English)", "size": "466 MB" },
+  { "id": "whisper-medium", "name": "Whisper Medium (Multi)", "size": "1.5 GB" }
+]

@@ -1,0 +1,32 @@
+[
+  {
+    "title": "Welcome to Swaram.",
+    "subtitle": "Your dictation assistant is ready. {time}",
+    "bg": "linear-gradient(135deg, #a8edea 0%, #fed6e3 100%)",
+    "showButton": true
+  },
+  {
+    "title": "Quick Shortcuts",
+    "subtitle": "Use keyboard shortcuts to quickly start and stop dictation without touching the mouse.",
+    "bg": "linear-gradient(135deg, #e0c3fc 0%, #8ec5fc 100%)",
+    "showButton": false
+  },
+  {
+    "title": "100% Offline Mode",
+    "subtitle": "Swaram works entirely on your device. No internet connection required.",
+    "bg": "linear-gradient(135deg, #fdfbfb 0%, #ebedee 100%)",
+    "showButton": false
+  },
+  {
+    "title": "Export & Copy",
+    "subtitle": "Easily copy or export your transcriptions right from your history.",
+    "bg": "linear-gradient(135deg, #f6d365 0%, #fda085 100%)",
+    "showButton": false
+  },
+  {
+    "title": "Speak Naturally",
+    "subtitle": "Our AI automatically handles punctuation and formatting for you.",
+    "bg": "linear-gradient(135deg, #84fab0 0%, #8fd3f4 100%)",
+    "showButton": false
+  }
+]
