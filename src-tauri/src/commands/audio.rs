@@ -1,16 +1,16 @@
-use tauri::command;
 use cpal::traits::{DeviceTrait, HostTrait};
+use tauri::command;
 
 #[command]
 pub fn get_microphones() -> Vec<String> {
     let host = cpal::default_host();
     let mut mics = Vec::new();
     let mut seen = std::collections::HashSet::new();
-    
+
     if let Ok(devices) = host.input_devices() {
         for device in devices {
             let mut name = String::new();
-            
+
             // Try to use name() first as recommended by cpal
             #[allow(deprecated)]
             if let Ok(desc) = device.name() {
@@ -28,22 +28,26 @@ pub fn get_microphones() -> Vec<String> {
             }
         }
     }
-    
+
     if mics.is_empty() {
         mics.push("Default Microphone".to_string());
     }
-    
+
     mics
 }
 
 #[command]
-pub fn set_microphone(mic_name: String) -> Result<(), String> {
-    println!("Selected microphone: {}", mic_name);
+pub fn set_microphone(
+    mic_name: String,
+    state: tauri::State<'_, crate::system::dictation::DictationState>,
+) -> Result<(), String> {
+    eprintln!("[Audio] Setting microphone to: {}", mic_name);
+    crate::system::dictation::set_selected_device(state.inner(), Some(mic_name));
     Ok(())
 }
 
 #[command]
 pub fn set_volume(volume: u32) -> Result<(), String> {
-    println!("Set volume to: {}", volume);
+    eprintln!("[Audio] Set volume to: {}%", volume);
     Ok(())
 }

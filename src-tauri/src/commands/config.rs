@@ -1,10 +1,13 @@
-use tauri::{command, AppHandle, Manager};
+use crate::database::Database;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use crate::database::Database;
+use tauri::{command, AppHandle, Manager};
 
 fn get_db(app: &AppHandle) -> Result<Database, String> {
-    let app_dir = app.path().app_data_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let app_dir = app
+        .path()
+        .app_data_dir()
+        .unwrap_or_else(|_| PathBuf::from("."));
     Database::new(&app_dir).map_err(|e| e.to_string())
 }
 

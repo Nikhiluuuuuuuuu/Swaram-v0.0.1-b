@@ -12,14 +12,17 @@ pub struct SystemSpecs {
 pub async fn get_system_specs() -> Result<SystemSpecs, String> {
     let mut sys = System::new_all();
     sys.refresh_all();
-    
+
     let total_ram_bytes = sys.total_memory();
     let ram_gb = total_ram_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
     let cpu_cores = sys.cpus().len();
-    
+
     // Quick async fetch of default GPU via wgpu
     let instance = wgpu::Instance::default();
-    let gpu_name = match instance.request_adapter(&wgpu::RequestAdapterOptions::default()).await {
+    let gpu_name = match instance
+        .request_adapter(&wgpu::RequestAdapterOptions::default())
+        .await
+    {
         Some(adapter) => adapter.get_info().name,
         None => "Unknown".to_string(),
     };

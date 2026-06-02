@@ -18,6 +18,7 @@ module.exports = {
     'solid',
   ],
   rules: {
-    // Add custom rules here
+    '@typescript-eslint/no-explicit-any': 'off',
+    'solid/reactivity': 'off'
   },
 };

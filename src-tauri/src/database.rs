@@ -1,17 +1,17 @@
 use rusqlite::{Connection, Result};
 use std::fs;
-use std::path::PathBuf;
 
 pub struct Database {
     conn: Connection,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub struct ModelRecord {
     pub id: String,
     pub name: String,
     pub status: String, // "installed", "downloading", "failed"
     pub local_path: Option<String>,
+    pub architecture: Option<String>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
@@ -54,27 +54,35 @@ pub struct ToneEntry {
 }
 
 impl Database {
-    pub fn new(app_dir: &PathBuf) -> Result<Self> {
+    pub fn new(app_dir: &std::path::Path) -> Result<Self> {
         let db_dir = app_dir.join("database");
         if !db_dir.exists() {
             fs::create_dir_all(&db_dir).expect("Failed to create database directory");
         }
-        
+
         let db_path = db_dir.join("swaram.db");
         let conn = Connection::open(db_path)?;
 
+        Ok(Database { conn })
+    }
+
+    pub fn init(&self) -> Result<()> {
         // Initialize schema
-        conn.execute(
+        self.conn.execute(
             "CREATE TABLE IF NOT EXISTS models (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
                 status TEXT NOT NULL,
-                local_path TEXT
+                local_path TEXT,
+                architecture TEXT
             )",
             (),
         )?;
+        let _ = self
+            .conn
+            .execute("ALTER TABLE models ADD COLUMN architecture TEXT", ());
 
-        conn.execute(
+        self.conn.execute(
             "CREATE TABLE IF NOT EXISTS history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 text TEXT NOT NULL,
@@ -88,9 +96,11 @@ impl Database {
         )?;
 
         // Migration to add model column if it doesn't exist
-        let _ = conn.execute("ALTER TABLE history ADD COLUMN model TEXT", ());
+        let _ = self
+            .conn
+            .execute("ALTER TABLE history ADD COLUMN model TEXT", ());
 
-        conn.execute(
+        self.conn.execute(
             "CREATE TABLE IF NOT EXISTS config (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
@@ -98,7 +108,7 @@ impl Database {
             (),
         )?;
 
-        conn.execute(
+        self.conn.execute(
             "CREATE TABLE IF NOT EXISTS dictionary (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 word TEXT NOT NULL,
@@ -107,7 +117,7 @@ impl Database {
             (),
         )?;
 
-        conn.execute(
+        self.conn.execute(
             "CREATE TABLE IF NOT EXISTS snippets (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 keyword TEXT NOT NULL,
@@ -116,7 +126,7 @@ impl Database {
             (),
         )?;
 
-        conn.execute(
+        self.conn.execute(
             "CREATE TABLE IF NOT EXISTS modes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
@@ -125,7 +135,7 @@ impl Database {
             (),
         )?;
 
-        conn.execute(
+        self.conn.execute(
             "CREATE TABLE IF NOT EXISTS tones (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
@@ -135,22 +145,37 @@ impl Database {
         )?;
 
         // Deduplication Migration: Remove duplicate entries keeping the lowest ID
-        let _ = conn.execute("DELETE FROM modes WHERE id NOT IN (SELECT MIN(id) FROM modes GROUP BY name)", ());
-        let _ = conn.execute("DELETE FROM tones WHERE id NOT IN (SELECT MIN(id) FROM tones GROUP BY name)", ());
-        let _ = conn.execute("DELETE FROM snippets WHERE id NOT IN (SELECT MIN(id) FROM snippets GROUP BY keyword)", ());
-        let _ = conn.execute("DELETE FROM dictionary WHERE id NOT IN (SELECT MIN(id) FROM dictionary GROUP BY word)", ());
+        let _ = self.conn.execute(
+            "DELETE FROM modes WHERE id NOT IN (SELECT MIN(id) FROM modes GROUP BY name)",
+            (),
+        );
+        let _ = self.conn.execute(
+            "DELETE FROM tones WHERE id NOT IN (SELECT MIN(id) FROM tones GROUP BY name)",
+            (),
+        );
+        let _ = self.conn.execute(
+            "DELETE FROM snippets WHERE id NOT IN (SELECT MIN(id) FROM snippets GROUP BY keyword)",
+            (),
+        );
+        let _ = self.conn.execute(
+            "DELETE FROM dictionary WHERE id NOT IN (SELECT MIN(id) FROM dictionary GROUP BY word)",
+            (),
+        );
 
-        Ok(Database { conn })
+        Ok(())
     }
 
     pub fn get_installed_models(&self) -> Result<Vec<ModelRecord>> {
-        let mut stmt = self.conn.prepare("SELECT id, name, status, local_path FROM models")?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, name, status, local_path, architecture FROM models")?;
         let model_iter = stmt.query_map([], |row| {
             Ok(ModelRecord {
                 id: row.get(0)?,
                 name: row.get(1)?,
                 status: row.get(2)?,
                 local_path: row.get(3)?,
+                architecture: row.get(4).unwrap_or(None),
             })
         })?;
 
@@ -163,16 +188,18 @@ impl Database {
 
     pub fn insert_or_update_model(&self, model: &ModelRecord) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO models (id, name, status, local_path)
-             VALUES (?1, ?2, ?3, ?4)
+            "INSERT INTO models (id, name, status, local_path, architecture)
+             VALUES (?1, ?2, ?3, ?4, ?5)
              ON CONFLICT(id) DO UPDATE SET
                 status = excluded.status,
-                local_path = excluded.local_path",
+                local_path = excluded.local_path,
+                architecture = excluded.architecture",
             (
                 &model.id,
                 &model.name,
                 &model.status,
                 &model.local_path,
+                &model.architecture,
             ),
         )?;
         Ok(())
@@ -199,24 +226,26 @@ impl Database {
         Ok(history)
     }
 
-    pub fn add_history_entry(&self, text: &str, timestamp: &str, duration: Option<&str>, failed: Option<bool>, audio_path: Option<&str>, model: Option<&str>) -> Result<i64> {
+    pub fn add_history_entry(
+        &self,
+        text: &str,
+        timestamp: &str,
+        duration: Option<&str>,
+        failed: Option<bool>,
+        audio_path: Option<&str>,
+        model: Option<&str>,
+    ) -> Result<i64> {
         self.conn.execute(
             "INSERT INTO history (text, timestamp, duration, failed, audio_path, model)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            (
-                text,
-                timestamp,
-                duration,
-                failed,
-                audio_path,
-                model,
-            ),
+            (text, timestamp, duration, failed, audio_path, model),
         )?;
         Ok(self.conn.last_insert_rowid())
     }
 
     pub fn delete_history_entry(&self, id: i64) -> Result<()> {
-        self.conn.execute("DELETE FROM history WHERE id = ?1", [id])?;
+        self.conn
+            .execute("DELETE FROM history WHERE id = ?1", [id])?;
         Ok(())
     }
 
@@ -227,9 +256,7 @@ impl Database {
 
     pub fn get_all_config(&self) -> Result<std::collections::HashMap<String, String>> {
         let mut stmt = self.conn.prepare("SELECT key, value FROM config")?;
-        let config_iter = stmt.query_map([], |row| {
-            Ok((row.get(0)?, row.get(1)?))
-        })?;
+        let config_iter = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
 
         let mut config_map = std::collections::HashMap::new();
         for item in config_iter {
@@ -256,7 +283,13 @@ macro_rules! impl_crud {
     ($struct_name:ident, $table_name:expr, $get_fn:ident, $add_fn:ident, $update_fn:ident, $delete_fn:ident, $f1:ident, $f2:ident) => {
         impl Database {
             pub fn $get_fn(&self) -> Result<Vec<$struct_name>> {
-                let sql = format!("SELECT id, {}, {} FROM {} ORDER BY {} ASC", stringify!($f1), stringify!($f2), $table_name, stringify!($f1));
+                let sql = format!(
+                    "SELECT id, {}, {} FROM {} ORDER BY {} ASC",
+                    stringify!($f1),
+                    stringify!($f2),
+                    $table_name,
+                    stringify!($f1)
+                );
                 let mut stmt = self.conn.prepare(&sql)?;
                 let iter = stmt.query_map([], |row| {
                     Ok($struct_name {
@@ -266,18 +299,30 @@ macro_rules! impl_crud {
                     })
                 })?;
                 let mut entries = Vec::new();
-                for item in iter { entries.push(item?); }
+                for item in iter {
+                    entries.push(item?);
+                }
                 Ok(entries)
             }
 
             pub fn $add_fn(&self, f1_val: &str, f2_val: &str) -> Result<i64> {
-                let sql = format!("INSERT INTO {} ({}, {}) VALUES (?1, ?2)", $table_name, stringify!($f1), stringify!($f2));
+                let sql = format!(
+                    "INSERT INTO {} ({}, {}) VALUES (?1, ?2)",
+                    $table_name,
+                    stringify!($f1),
+                    stringify!($f2)
+                );
                 self.conn.execute(&sql, (f1_val, f2_val))?;
                 Ok(self.conn.last_insert_rowid())
             }
 
             pub fn $update_fn(&self, id: i64, f1_val: &str, f2_val: &str) -> Result<()> {
-                let sql = format!("UPDATE {} SET {} = ?1, {} = ?2 WHERE id = ?3", $table_name, stringify!($f1), stringify!($f2));
+                let sql = format!(
+                    "UPDATE {} SET {} = ?1, {} = ?2 WHERE id = ?3",
+                    $table_name,
+                    stringify!($f1),
+                    stringify!($f2)
+                );
                 self.conn.execute(&sql, (f1_val, f2_val, id))?;
                 Ok(())
             }
@@ -291,9 +336,45 @@ macro_rules! impl_crud {
     };
 }
 
-impl_crud!(DictionaryEntry, "dictionary", get_dictionary, add_dictionary_entry, update_dictionary_entry, delete_dictionary_entry, word, replacement);
-impl_crud!(SnippetEntry, "snippets", get_snippets, add_snippet_entry, update_snippet_entry, delete_snippet_entry, keyword, text);
-impl_crud!(ModeEntry, "modes", get_modes, add_mode_entry, update_mode_entry, delete_mode_entry, name, prompt);
-impl_crud!(ToneEntry, "tones", get_tones, add_tone_entry, update_tone_entry, delete_tone_entry, name, prompt);
+impl_crud!(
+    DictionaryEntry,
+    "dictionary",
+    get_dictionary,
+    add_dictionary_entry,
+    update_dictionary_entry,
+    delete_dictionary_entry,
+    word,
+    replacement
+);
+impl_crud!(
+    SnippetEntry,
+    "snippets",
+    get_snippets,
+    add_snippet_entry,
+    update_snippet_entry,
+    delete_snippet_entry,
+    keyword,
+    text
+);
+impl_crud!(
+    ModeEntry,
+    "modes",
+    get_modes,
+    add_mode_entry,
+    update_mode_entry,
+    delete_mode_entry,
+    name,
+    prompt
+);
+impl_crud!(
+    ToneEntry,
+    "tones",
+    get_tones,
+    add_tone_entry,
+    update_tone_entry,
+    delete_tone_entry,
+    name,
+    prompt
+);
 
 // Implementations generated by macro

@@ -3,11 +3,12 @@ import solidPlugin from 'vite-plugin-solid';
 
 export default defineConfig({
   plugins: [solidPlugin()],
+  cacheDir: '.vitest-cache',
   test: {
     environment: 'jsdom',
     globals: true,
     transformMode: { web: [/\.[jt]sx?$/] },
-    setupFiles: ['node_modules/@testing-library/jest-dom/vitest'],
+    setupFiles: ['test/setup.ts'],
     // if you have few tests, keep them fast by isolating environment
     isolate: false,
   },

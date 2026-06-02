@@ -1,6 +1,6 @@
 import { createSignal, onMount, onCleanup, createResource, Show, For } from "solid-js";
-import { styled } from "solid-styled-components";
-import { Mic, Copy, Star, RotateCcw, Trash2, Play } from "lucide-solid";
+
+import { Mic, Copy, Trash2, MoreVertical, Flag, Undo, RefreshCw, FileAudio } from "lucide-solid";
 import { TabContainer } from "../components/SharedStyles";
 import { invoke } from "@tauri-apps/api/core";
 import noHistoryBanner from "../assets/images/No_History_Banner.png";
@@ -15,36 +15,50 @@ type HistoryEntry = {
   model?: string;
 };
 
-// --- History Item Component ---
-function HistoryItem(props: { item: HistoryEntry, onDelete: (id: number) => void }) {
+function HistoryItem(props: { item: HistoryEntry, onDelete: (id: number) => void, onExtract: (id: number) => void }) {
+  const [showMenu, setShowMenu] = createSignal(false);
+  
+  const formattedTime = () => {
+    const d = new Date(parseInt(props.item.timestamp) * 1000);
+    return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  };
+
   return (
     <ItemContainer>
-      <ItemHeader>
-        <ItemTime>{props.item.timestamp}</ItemTime>
-        <ActionIcons>
-          <IconButton title="Copy"><Copy size={18} /></IconButton>
-          <IconButton title="Star"><Star size={18} /></IconButton>
-          <Show when={props.item.failed}>
-            <IconButton title="Retry"><RotateCcw size={18} /></IconButton>
+      <ItemTime>{formattedTime()}</ItemTime>
+      <ItemText class={props.item.failed ? "failed" : ""}>{props.item.text}</ItemText>
+      <ActionsGroup class="actions">
+        <ActionBtn title="Copy" onClick={() => navigator.clipboard.writeText(props.item.text)}>
+          <Copy size={18} />
+        </ActionBtn>
+        <ActionBtn title="Flag">
+          <Flag size={18} />
+        </ActionBtn>
+        <div style={{ position: "relative" }}>
+          <ActionBtn class="more-btn" title="More options" onClick={() => setShowMenu(!showMenu())}>
+            <MoreVertical size={18} />
+          </ActionBtn>
+          <Show when={showMenu()}>
+            <>
+              <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, "z-index": 99 }} onClick={() => setShowMenu(false)} />
+              <ContextMenuPopup onClick={() => setShowMenu(false)}>
+                <MenuItem onClick={() => {}}>
+                  <Undo size={16} /> Undo AI edit
+                </MenuItem>
+                <MenuItem onClick={() => {}}>
+                  <RefreshCw size={16} /> Retry transcript
+                </MenuItem>
+                <MenuItem class="danger" onClick={() => props.onDelete(props.item.id)}>
+                  <Trash2 size={16} /> Delete transcript
+                </MenuItem>
+                <MenuItem onClick={() => props.onExtract(props.item.id)}>
+                  <FileAudio size={16} /> Extract audio
+                </MenuItem>
+              </ContextMenuPopup>
+            </>
           </Show>
-          <IconButton title="Delete" onClick={() => props.onDelete(props.item.id)}><Trash2 size={18} /></IconButton>
-        </ActionIcons>
-      </ItemHeader>
-      
-      <ItemText class={props.item.failed ? "failed" : ""}>
-        {props.item.text}
-      </ItemText>
-      
-      <AudioPlayer>
-        <PlayButton>
-          <Play size={20} fill="currentColor" />
-        </PlayButton>
-        <TimeLabel>0:00</TimeLabel>
-        <ProgressBarContainer>
-          <ProgressBarHandle />
-        </ProgressBarContainer>
-        <TimeLabel>{props.item.duration || "0:00"}</TimeLabel>
-      </AudioPlayer>
+        </div>
+      </ActionsGroup>
     </ItemContainer>
   );
 }
@@ -101,6 +115,44 @@ export default function DashboardTab(props: { searchQuery?: string }) {
     return list.filter(item => item.text.toLowerCase().includes(q));
   };
 
+  const groupedHistory = () => {
+    const list = filteredHistory();
+    const groups: Record<string, HistoryEntry[]> = {};
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+
+    list.forEach(item => {
+      const date = new Date(parseInt(item.timestamp) * 1000);
+      let dayLabel = date.toLocaleDateString();
+      if (date.toDateString() === today.toDateString()) {
+        dayLabel = "TODAY";
+      } else if (date.toDateString() === yesterday.toDateString()) {
+        dayLabel = "YESTERDAY";
+      }
+      
+      if (!groups[dayLabel]) {
+        groups[dayLabel] = [];
+      }
+      groups[dayLabel].push(item);
+    });
+    
+    return Object.entries(groups).sort((a, b) => {
+      const dateA = parseInt(a[1][0].timestamp);
+      const dateB = parseInt(b[1][0].timestamp);
+      return dateB - dateA; // descending
+    });
+  };
+
+  const handleExtract = async (id: number) => {
+    try {
+      await invoke("extract_history_audio", { id });
+    } catch (e) {
+      console.error("Failed to extract audio", e);
+      alert(e);
+    }
+  };
+
   const statsByModel = () => {
     const list = history() || [];
     const stats: Record<string, number> = {};
@@ -143,7 +195,9 @@ export default function DashboardTab(props: { searchQuery?: string }) {
                       <Greeting>{slide.title}</Greeting>
                       <HeroSubtext>{slide.subtitle(time())}</HeroSubtext>
                       <Show when={slide.showButton}>
-                        <StartButton>
+                        <StartButton onClick={() => {
+                          window.dispatchEvent(new CustomEvent("toggle_dictation"));
+                        }}>
                           <Mic size={18} />
                           <span>Start Dictation</span>
                         </StartButton>
@@ -177,11 +231,20 @@ export default function DashboardTab(props: { searchQuery?: string }) {
               </EmptyStateText>
             </EmptyState>
           }>
-            <HistoryList>
-              <For each={filteredHistory()}>
-                {(item) => <HistoryItem item={item} onDelete={handleDelete} />}
+            <div style={{ display: "flex", "flex-direction": "column", gap: "24px" }}>
+              <For each={groupedHistory()}>
+                {([dateLabel, items]) => (
+                  <div>
+                    <DateHeader>{dateLabel}</DateHeader>
+                    <HistoryList>
+                      <For each={items}>
+                        {(item) => <HistoryItem item={item} onDelete={handleDelete} onExtract={handleExtract} />}
+                      </For>
+                    </HistoryList>
+                  </div>
+                )}
               </For>
-            </HistoryList>
+            </div>
           </Show>
         </MainColumn>
 
@@ -220,380 +283,198 @@ export default function DashboardTab(props: { searchQuery?: string }) {
 
 // --- CSS STYLES ---
 
-const DashboardLayout = styled("div")`
-  display: flex;
-  flex-direction: row;
-  gap: 32px;
-  animation: fadeIn 0.4s ease-out;
+function DashboardLayout(props: any) {
+  const local = props;
+  return <div class={"dashboard-layout " + (local.class || "")} {...props}>{local.children}</div>;
+}
 
-  @keyframes fadeIn {
-    from { opacity: 0; transform: translateY(10px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-`;
 
-const StatsColumn = styled("div")`
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-  width: 260px;
-  flex-shrink: 0;
-`;
+function StatsColumn(props: any) {
+  const local = props;
+  return <div class={"stats-column " + (local.class || "")} {...props}>{local.children}</div>;
+}
 
-const MainColumn = styled("div")`
-  display: flex;
-  flex-direction: column;
-  gap: 32px;
-  flex-grow: 1;
-`;
 
-const HeroSection = styled("div")`
-  position: relative;
-  border-radius: 24px;
-  overflow: hidden;
-  box-shadow: 0 10px 30px rgba(var(--shadow-rgb), 0.05);
-  display: flex;
-  align-items: center;
-  min-height: 220px;
-`;
+function MainColumn(props: any) {
+  const local = props;
+  return <div class={"main-column " + (local.class || "")} {...props}>{local.children}</div>;
+}
 
-const CarouselContainer = styled("div")`
-  position: relative;
-  width: 100%;
-  height: 100%;
-  min-height: 220px;
-`;
 
-const Slide = styled("div")`
-  position: absolute;
-  top: 0; left: 0; width: 100%; height: 100%;
-  box-sizing: border-box;
-  display: flex;
-  align-items: center;
-  padding: 40px;
-  opacity: 0;
-  pointer-events: none;
-  transform: scale(0.97) translateY(10px);
-  transition: opacity 0.8s cubic-bezier(0.25, 1, 0.5, 1), transform 0.8s cubic-bezier(0.25, 1, 0.5, 1);
-  z-index: 0;
+function HeroSection(props: any) {
+  const local = props;
+  return <div class={"hero-section " + (local.class || "")} {...props}>{local.children}</div>;
+}
 
-  &.active {
-    opacity: 1;
-    pointer-events: auto;
-    transform: scale(1) translateY(0);
-    z-index: 1;
-  }
-`;
 
-const SlideBackground = styled("div")`
-  position: absolute;
-  top: 0; left: 0; right: 0; bottom: 0;
-  opacity: 0.8;
-  z-index: 0;
-  
-  &::after {
-    content: "";
-    position: absolute;
-    top: 0; left: 0; right: 0; bottom: 0;
-    backdrop-filter: blur(20px);
-    background: rgba(255, 255, 255, 0.4);
-  }
-`;
+function CarouselContainer(props: any) {
+  const local = props;
+  return <div class={"carousel-container " + (local.class || "")} {...props}>{local.children}</div>;
+}
 
-const CarouselDots = styled("div")`
-  position: absolute;
-  bottom: 12px;
-  left: 0;
-  right: 0;
-  display: flex;
-  justify-content: center;
-  gap: 6px;
-  z-index: 2;
-`;
 
-const Dot = styled("button")`
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  border: none;
-  background: rgba(var(--hover-rgb), 0.15);
-  cursor: pointer;
-  padding: 0;
-  position: relative;
-  overflow: hidden;
-  transition: all 0.4s cubic-bezier(0.25, 1, 0.5, 1);
-  
-  &.active {
-    background: rgba(var(--hover-rgb), 0.1);
-    width: 32px;
-    border-radius: 4px;
-  }
-  
-  &:hover {
-    background: rgba(var(--hover-rgb), 0.3);
-  }
-`;
+function Slide(props: any) {
+  const local = props;
+  return <div class={"slide " + (local.class || "")} {...props}>{local.children}</div>;
+}
 
-const DotProgress = styled("div")`
-  position: absolute;
-  top: 0;
-  left: 0;
-  height: 100%;
-  width: 100%;
-  background: var(--ink);
-  transform: scaleX(0);
-  transform-origin: left;
-  
-  .active & {
-    animation: fillProgress 10.0s linear forwards;
-  }
 
-  @keyframes fillProgress {
-    0% { transform: scaleX(0); }
-    100% { transform: scaleX(1); }
-  }
-`;
+function SlideBackground(props: any) {
+  const local = props;
+  return <div class={"slide-background " + (local.class || "")} {...props}>{local.children}</div>;
+}
 
-const HeroContent = styled("div")`
-  position: relative;
-  z-index: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-`;
 
-const Greeting = styled("h1")`
-  font-size: 32px;
-  font-weight: 700;
-  color: var(--ink);
-  letter-spacing: -0.5px;
-  margin: 0;
-`;
+function CarouselDots(props: any) {
+  const local = props;
+  return <div class={"carousel-dots " + (local.class || "")} {...props}>{local.children}</div>;
+}
 
-const HeroSubtext = styled("p")`
-  font-size: 16px;
-  color: var(--ink-muted);
-  font-weight: 500;
-  margin: 0 0 16px 0;
-`;
 
-const StartButton = styled("button")`
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  background: var(--ink);
-  color: var(--alabaster-base);
-  border: none;
-  border-radius: 8px;
-  padding: 14px 24px;
-  font-size: 15px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-  width: fit-content;
-  box-shadow: 0 4px 14px rgba(var(--shadow-rgb), 0.1);
+function Dot(props: any) {
+  const local = props;
+  return <button class={"dot " + (local.class || "")} {...props}>{local.children}</button>;
+}
 
-  &:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(var(--shadow-rgb), 0.15);
-    background: var(--accent);
-  }
-  
-  &:active {
-    transform: translateY(0);
-  }
-`;
+
+function DotProgress(props: any) {
+  const local = props;
+  return <div class={"dot-progress " + (local.class || "")} {...props}>{local.children}</div>;
+}
+
+
+function HeroContent(props: any) {
+  const local = props;
+  return <div class={"hero-content " + (local.class || "")} {...props}>{local.children}</div>;
+}
+
+
+function Greeting(props: any) {
+  const local = props;
+  return <h1 class={"greeting " + (local.class || "")} {...props}>{local.children}</h1>;
+}
+
+
+function HeroSubtext(props: any) {
+  const local = props;
+  return <p class={"hero-subtext " + (local.class || "")} {...props}>{local.children}</p>;
+}
+
+
+function StartButton(props: any) {
+  const local = props;
+  return <button class={"start-button " + (local.class || "")} {...props}>{local.children}</button>;
+}
 
 
 
-const StatsWindow = styled("div")`
-  background: var(--alabaster-light);
-  border-radius: 12px;
-  padding: 32px 24px;
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-  box-shadow: 0 4px 15px rgba(var(--shadow-rgb), 0.02);
-  border: 1px solid var(--alabaster-deep);
-`;
 
-const StatBlock = styled("div")`
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-`;
+function StatsWindow(props: any) {
+  const local = props;
+  return <div class={"stats-window " + (local.class || "")} {...props}>{local.children}</div>;
+}
 
-const StatNum = styled("span")`
-  font-family: 'Georgia', 'Times New Roman', serif;
-  font-size: 32px;
-  color: var(--ink);
-`;
 
-const StatText = styled("span")`
-  font-size: 16px;
-  color: var(--ink-muted);
-  font-weight: 400;
-`;
+function StatBlock(props: any) {
+  const local = props;
+  return <div class={"stat-block " + (local.class || "")} {...props}>{local.children}</div>;
+}
 
-const ModelStatBlock = styled("div")`
-  margin-top: 8px;
-  padding-top: 24px;
-  border-top: 1px solid var(--alabaster-deep);
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-`;
 
-const ModelName = styled("div")`
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  color: var(--ink-muted);
-  font-weight: 600;
-`;
+function StatNum(props: any) {
+  const local = props;
+  return <span class={"stat-num " + (local.class || "")} {...props}>{local.children}</span>;
+}
+
+
+function StatText(props: any) {
+  const local = props;
+  return <span class={"stat-text " + (local.class || "")} {...props}>{local.children}</span>;
+}
+
+
+function ModelStatBlock(props: any) {
+  const local = props;
+  return <div class={"model-stat-block " + (local.class || "")} {...props}>{local.children}</div>;
+}
+
+
+function ModelName(props: any) {
+  const local = props;
+  return <div class={"model-name " + (local.class || "")} {...props}>{local.children}</div>;
+}
 
 
 
-const HistoryList = styled("div")`
-  display: flex;
-  flex-direction: column;
-  background: var(--alabaster-base);
-  border-radius: var(--surface-radius);
-  box-shadow: 4px 4px 10px var(--alabaster-shadow), 
-              -4px -4px 10px var(--alabaster-light);
-  padding: 8px;
-`;
 
-const ItemContainer = styled("div")`
-  display: flex;
-  flex-direction: column;
-  padding: 20px;
-  border-bottom: 1px solid var(--alabaster-deep);
-  
-  &:last-child {
-    border-bottom: none;
-  }
-`;
+function DateHeader(props: any) {
+  const local = props;
+  return <div class={"date-header " + (local.class || "")} {...props}>{local.children}</div>;
+}
 
-const ItemHeader = styled("div")`
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
-`;
 
-const ItemTime = styled("span")`
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--ink);
-`;
+function HistoryList(props: any) {
+  const local = props;
+  return <div class={"history-list " + (local.class || "")} {...props}>{local.children}</div>;
+}
 
-const ActionIcons = styled("div")`
-  display: flex;
-  gap: 16px;
-`;
 
-const IconButton = styled("button")`
-  background: none;
-  border: none;
-  color: var(--ink-muted);
-  cursor: pointer;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: color 0.2s;
-  
-  &:hover {
-    color: var(--ink);
-  }
-`;
+function ItemContainer(props: any) {
+  const local = props;
+  return <div class={"item-container " + (local.class || "")} {...props}>{local.children}</div>;
+}
 
-const ItemText = styled("p")`
-  font-size: 15px;
-  color: var(--ink);
-  font-style: italic;
-  margin: 0 0 20px 0;
-  line-height: 1.5;
-  
-  &.failed {
-    color: #e53935;
-  }
-`;
 
-const AudioPlayer = styled("div")`
-  display: flex;
-  align-items: center;
-  gap: 16px;
-`;
+function ItemTime(props: any) {
+  const local = props;
+  return <div class={"item-time " + (local.class || "")} {...props}>{local.children}</div>;
+}
 
-const PlayButton = styled("button")`
-  background: none;
-  border: none;
-  color: var(--ink);
-  cursor: pointer;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  
-  &:hover {
-    color: var(--ink-muted);
-  }
-`;
 
-const TimeLabel = styled("span")`
-  font-size: 13px;
-  color: var(--ink-muted);
-  min-width: 32px;
-`;
+function ItemText(props: any) {
+  const local = props;
+  return <div class={"item-text " + (local.class || "")} {...props}>{local.children}</div>;
+}
 
-const ProgressBarContainer = styled("div")`
-  flex-grow: 1;
-  height: 4px;
-  background-color: var(--alabaster-deep);
-  border-radius: 2px;
-  position: relative;
-  cursor: pointer;
-  box-shadow: inset 1px 1px 2px var(--alabaster-shadow);
-`;
 
-const ProgressBarHandle = styled("div")`
-  width: 14px;
-  height: 14px;
-  background-color: var(--ink);
-  border-radius: 50%;
-  position: absolute;
-  top: 50%;
-  left: 0;
-  transform: translateY(-50%);
-  box-shadow: 0 1px 3px rgba(var(--shadow-rgb), 0.2);
-`;
+function ActionsGroup(props: any) {
+  const local = props;
+  return <div class={"actions-group " + (local.class || "")} {...props}>{local.children}</div>;
+}
 
-const EmptyState = styled("div")`
-  padding: 20px 0;
-  text-align: center;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 24px;
-`;
 
-const EmptyStateImage = styled("img")`
-  width: 100%;
-  max-width: 650px;
-  border-radius: 20px; /* Smooth corners */
-  object-fit: cover;
-  box-shadow: 0 10px 40px rgba(var(--shadow-rgb), 0.1);
-`;
+function ActionBtn(props: any) {
+  const local = props;
+  return <button class={"action-btn " + (local.class || "")} {...props}>{local.children}</button>;
+}
 
-const EmptyStateText = styled("h2")`
-  margin-top: 8px;
-  font-family: 'Outfit', 'Inter', system-ui, sans-serif;
-  font-size: 22px;
-  font-weight: 700;
-  color: var(--ink);
-  line-height: 1.5;
-  max-width: 500px;
-  letter-spacing: -0.5px;
-`;
+
+function ContextMenuPopup(props: any) {
+  const local = props;
+  return <div class={"context-menu-popup " + (local.class || "")} {...props}>{local.children}</div>;
+}
+
+
+function MenuItem(props: any) {
+  const local = props;
+  return <button class={"menu-item " + (local.class || "")} {...props}>{local.children}</button>;
+}
+
+
+function EmptyState(props: any) {
+  const local = props;
+  return <div class={"empty-state " + (local.class || "")} {...props}>{local.children}</div>;
+}
+
+
+function EmptyStateImage(props: any) {
+  const local = props;
+  return <img class={"empty-state-image " + (local.class || "")} {...props}>{local.children}</img>;
+}
+
+
+function EmptyStateText(props: any) {
+  const local = props;
+  return <h2 class={"empty-state-text " + (local.class || "")} {...props}>{local.children}</h2>;
+}
+

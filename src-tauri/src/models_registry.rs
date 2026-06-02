@@ -39,22 +39,34 @@ pub struct ModelManifest {
     pub models: Vec<ModelManifestItem>,
 }
 
-pub async fn search_huggingface(query: &str, filters: &str, limit: u32, skip: u32) -> Result<Vec<HfModel>, Box<dyn std::error::Error>> {
+pub async fn search_huggingface(
+    query: &str,
+    filters: &str,
+    limit: u32,
+    skip: u32,
+) -> Result<Vec<HfModel>, Box<dyn std::error::Error>> {
     // Simple URL encoding for spaces and common characters to prevent reqwest from panicking
     let encoded_query = query.replace(" ", "%20").replace("+", "%2B");
-    
+
     let url = if filters.is_empty() {
-        format!("https://huggingface.co/api/models?search={}&limit={}&skip={}&siblings=true", encoded_query, limit, skip)
+        format!(
+            "https://huggingface.co/api/models?search={}&limit={}&skip={}&siblings=true",
+            encoded_query, limit, skip
+        )
     } else {
-        format!("https://huggingface.co/api/models?search={}&filter={}&limit={}&skip={}&siblings=true", encoded_query, filters, limit, skip)
+        format!(
+            "https://huggingface.co/api/models?search={}&filter={}&limit={}&skip={}&siblings=true",
+            encoded_query, filters, limit, skip
+        )
     };
-    
+
     let client = reqwest::Client::new();
-    let response = client.get(&url)
+    let response = client
+        .get(&url)
         .header("User-Agent", "Swaram-Desktop")
         .send()
         .await?;
-    
+
     if response.status().is_success() {
         let models: Vec<HfModel> = response.json().await?;
         Ok(models)
@@ -66,11 +78,12 @@ pub async fn search_huggingface(query: &str, filters: &str, limit: u32, skip: u3
 pub async fn get_model_tree(model_id: &str) -> Result<Vec<HfTreeFile>, Box<dyn std::error::Error>> {
     let url = format!("https://huggingface.co/api/models/{}/tree/main", model_id);
     let client = reqwest::Client::new();
-    let response = client.get(&url)
+    let response = client
+        .get(&url)
         .header("User-Agent", "Swaram-Desktop")
         .send()
         .await?;
-    
+
     if response.status().is_success() {
         let tree: Vec<HfTreeFile> = response.json().await?;
         Ok(tree)
@@ -93,17 +106,21 @@ pub struct HfLanguageTag {
 pub async fn get_huggingface_languages() -> Result<Vec<HfLanguageTag>, Box<dyn std::error::Error>> {
     let url = "https://huggingface.co/api/models-tags-by-type";
     let client = reqwest::Client::new();
-    let response = client.get(url)
+    let response = client
+        .get(url)
         .header("User-Agent", "Swaram-Desktop")
         .send()
         .await?;
-    
+
     if response.status().is_success() {
         let tags: serde_json::Value = response.json().await?;
         if let Some(languages) = tags.get("language").and_then(|l| l.as_array()) {
             let mut result = Vec::new();
             for lang in languages {
-                if let (Some(id), Some(label)) = (lang.get("id").and_then(|i| i.as_str()), lang.get("label").and_then(|l| l.as_str())) {
+                if let (Some(id), Some(label)) = (
+                    lang.get("id").and_then(|i| i.as_str()),
+                    lang.get("label").and_then(|l| l.as_str()),
+                ) {
                     result.push(HfLanguageTag {
                         id: id.to_string(),
                         label: label.to_string(),

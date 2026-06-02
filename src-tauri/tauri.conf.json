@@ -13,12 +13,28 @@
     "windows": [
       {
         "title": "Swaram",
+        "label": "main",
+        "url": "index.html",
         "width": 800,
         "height": 600,
         "minWidth": 800,
         "minHeight": 600,
         "decorations": false,
         "transparent": true
+      },
+      {
+        "title": "Swaram Overlay",
+        "label": "pill",
+        "url": "pill.html",
+        "width": 800,
+        "height": 80,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "resizable": false,
+        "shadow": false,
+        "skipTaskbar": true,
+        "dragDropEnabled": false
       }
     ],
     "security": {

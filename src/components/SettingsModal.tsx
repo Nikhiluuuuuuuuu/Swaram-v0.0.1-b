@@ -1,9 +1,10 @@
 import { createResource, createSignal, Show, For } from "solid-js";
-import { styled } from "solid-styled-components";
+
 import { ModalOverlay, ToggleSwitch, MonoValue } from "./SharedStyles";
 import { invoke } from "@tauri-apps/api/core";
-import { unregisterAll } from "@tauri-apps/plugin-global-shortcut";
 import { Cloud, Sliders, Monitor, Mic, Keyboard } from "lucide-solid";
+import { registerAppShortcuts, unregisterAppShortcuts } from "../dictation";
+import { DEFAULT_SHORTCUTS, validateShortcut } from "../shortcuts";
 
 // --- Types ---
 type HardwareOptions = {
@@ -54,8 +55,28 @@ export function MicrophoneVolume(props: { value: number, onChange: (val: number)
   );
 }
 
-export function ShortcutItem(props: { label: string; shortcut: string; onChange: (val: string) => void }) {
+function formatKey(key: string): string {
+  // basic detection for macOS vs Windows/Linux
+  const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0 || navigator.userAgent.includes('Mac');
+  
+  if (key === 'CommandOrControl') {
+    return isMac ? 'Cmd' : 'Ctrl';
+  }
+  if (key === 'Super' || key === 'Meta') {
+    return isMac ? 'Cmd' : 'Win';
+  }
+  if (key === 'Control') {
+    return 'Ctrl';
+  }
+  if (key === 'Alt') {
+    return isMac ? 'Option' : 'Alt';
+  }
+  return key;
+}
+
+export function ShortcutItem(props: { label: string; shortcut: string; onChange: (val: string) => Promise<boolean> }) {
   const [editing, setEditing] = createSignal(false);
+  const [error, setError] = createSignal("");
 
   const KEY_MAPPING: Record<string, string> = {
     "Space": "Space",
@@ -69,14 +90,21 @@ export function ShortcutItem(props: { label: string; shortcut: string; onChange:
     "Tab": "Tab",
   };
 
-  const handleKeyDown = (e: KeyboardEvent) => {
+  const finishEditing = () => {
+    setEditing(false);
+    registerAppShortcuts().catch((error) => {
+      console.error("Failed to restore app shortcuts:", error);
+    });
+  };
+
+  const handleKeyDown = async (e: KeyboardEvent) => {
     if (!editing()) return;
     e.preventDefault();
     e.stopPropagation();
 
     // Only cancel if Esc is pressed without modifiers
     if (e.key === "Escape" && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey) {
-      setEditing(false);
+      finishEditing();
       return;
     }
     
@@ -96,9 +124,17 @@ export function ShortcutItem(props: { label: string; shortcut: string; onChange:
     else if (e.key.length === 1) baseKey = e.key.toUpperCase();
     
     const newShortcut = [...modifiers, baseKey].join("+");
-    
-    props.onChange(newShortcut);
-    setEditing(false);
+    const validationError = validateShortcut(newShortcut);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+
+    setError("");
+    const saved = await props.onChange(newShortcut);
+    if (saved) {
+      setEditing(false);
+    }
   };
 
   return (
@@ -107,61 +143,46 @@ export function ShortcutItem(props: { label: string; shortcut: string; onChange:
       <ShortcutButton 
         class={editing() ? "editing" : ""}
         onClick={() => {
-          // Temporarily unregister all global shortcuts while editing so they don't intercept!
-          unregisterAll().catch(e => console.error(e)).finally(() => setEditing(true));
+          setError("");
+          unregisterAppShortcuts()
+            .catch((error) => console.error("Failed to pause app shortcuts:", error))
+            .finally(() => setEditing(true));
         }}
         onKeyDown={handleKeyDown}
-        onBlur={() => {
-          setEditing(false);
-          // Reload shortcuts in App.tsx by dispatching an event
-          window.dispatchEvent(new CustomEvent("reload_shortcuts"));
-        }}
+        onBlur={finishEditing}
       >
         <Show when={editing()} fallback={
           <For each={props.shortcut.split('+')}>
-            {(key) => <Keycap>{key}</Keycap>}
+            {(key) => <Keycap>{formatKey(key)}</Keycap>}
           </For>
         }>
           <Keycap style={{ "border-color": "#5e5e5e", "box-shadow": "0 2px 0 #5e5e5e" }}>Listening...</Keycap>
         </Show>
       </ShortcutButton>
+      <Show when={error()}>
+        <ShortcutError>{error()}</ShortcutError>
+      </Show>
     </RefCardRow>
   );
 }
 
-const ShortcutButton = styled("button")`
-  display: flex;
-  gap: 6px;
-  background-color: transparent;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  padding: 4px;
-  cursor: pointer;
-  transition: all 0.2s ease;
+function ShortcutButton(props: any) {
+  const local = props;
+  return <button class={"shortcut-button " + (local.class || "")} {...props}>{local.children}</button>;
+}
 
-  &:hover {
-    background-color: rgba(0,0,0,0.03);
-  }
-  &.editing {
-    background-color: rgba(0,0,0,0.03);
-  }
-`;
 
-const Keycap = styled("kbd")`
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: #ffffff;
-  border: 1px solid #d1cfcc;
-  box-shadow: 0 1px 1px rgba(0,0,0,0.05), 0 2px 0 #d1cfcc;
-  border-radius: 6px;
-  padding: 4px 8px;
-  min-width: 28px;
-  font-family: inherit;
-  font-size: 12px;
-  font-weight: 600;
-  color: #2d2d2d;
-`;
+function Keycap(props: any) {
+  const local = props;
+  return <kbd class={"keycap " + (local.class || "")} {...props}>{local.children}</kbd>;
+}
+
+
+function ShortcutError(props: any) {
+  const local = props;
+  return <span class={"shortcut-error " + (local.class || "")} {...props}>{local.children}</span>;
+}
+
 
 export function ToggleFeature(props: { title: string; on: boolean; onChange: (val: boolean) => void }) {
   return (
@@ -176,7 +197,7 @@ export function DropdownFeature(props: { title: string; options: string[]; value
   return (
     <RefCardRow>
       <span>{props.title}</span>
-      <RefSelect value={props.value} onChange={(e) => props.onChange(e.target.value)}>
+      <RefSelect value={props.value} onChange={(e: any) => props.onChange(e.target.value)}>
         <For each={props.options}>
           {(opt) => <option value={opt}>{opt}</option>}
         </For>
@@ -185,23 +206,11 @@ export function DropdownFeature(props: { title: string; options: string[]; value
   );
 }
 
-const RefSelect = styled("select")`
-  background-color: #ffffff;
-  color: #2d2d2d;
-  border: 1px solid #e0dfdc;
-  border-radius: 8px;
-  padding: 6px 12px;
-  font-size: 14px;
-  outline: none;
-  min-width: 140px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  max-width: 200px;
+function RefSelect(props: any) {
+  const local = props;
+  return <select class={"ref-select " + (local.class || "")} {...props}>{local.children}</select>;
+}
 
-  &:focus {
-    border-color: #5e5e5e;
-  }
-`;
 
 // --- Main Modal ---
 
@@ -216,22 +225,42 @@ export default function SettingsModal(props: { isOpen: boolean; onClose: () => v
     return await invoke("get_all_config");
   });
 
-  const saveConfig = (k: string, v: string) => {
+  const saveConfig = async (k: string, v: string) => {
+    if (k.startsWith("shortcut_")) {
+      const validationError = validateShortcut(v);
+      if (validationError) {
+        alert(validationError);
+        return false;
+      }
+    }
+
     if (config()) {
       mutate((prev) => prev ? { ...prev, [k]: v } : { [k]: v });
     }
-    invoke("save_config", { key: k, value: v });
+
+    try {
+      await invoke("save_config", { key: k, value: v });
+
+      if (k.startsWith("shortcut_")) {
+        await registerAppShortcuts();
+      }
+      return true;
+    } catch (error) {
+      console.error("Failed to save config:", error);
+      alert(`Failed to save setting: ${error}`);
+      return false;
+    }
   };
 
   const SHORTCUT_CONFIGS = [
-    { id: "shortcut_toggle", label: "Start/Stop Recording", default: "Ctrl+Shift+R" },
-    { id: "shortcut_hold", label: "Hold to Record", default: "Alt+Space" },
-    { id: "shortcut_cancel", label: "Cancel Recording", default: "Esc" },
+    { id: "shortcut_toggle", label: "Start/Stop Recording", default: DEFAULT_SHORTCUTS.shortcut_toggle },
+    { id: "shortcut_hold", label: "Hold to Record", default: DEFAULT_SHORTCUTS.shortcut_hold },
+    { id: "shortcut_cancel", label: "Cancel Recording", default: DEFAULT_SHORTCUTS.shortcut_cancel },
   ];
 
   return (
     <Show when={props.isOpen && config()}>
-      <ModalOverlay onClick={(e) => { if (e.target === e.currentTarget) props.onClose(); }} style={{ "z-index": 10001, "background-color": "rgba(0,0,0,0.2)" }}>
+      <ModalOverlay onClick={(e: any) => { if (e.target === e.currentTarget) props.onClose(); }} style={{ "z-index": 10001, "background-color": "rgba(0,0,0,0.2)" }}>
         <RefModalContent>
           {/* LEFT SIDEBAR */}
           <RefSidebar>
@@ -294,15 +323,6 @@ export default function SettingsModal(props: { isOpen: boolean; onClose: () => v
                 />
               </RefCardGroup>
 
-              <RefSectionTitle>Keyboard</RefSectionTitle>
-              <RefCardGroup>
-                <DropdownFeature 
-                  title="Keyboard Implementation" 
-                  options={["Handy Keys", "Tauri Global Shortcut"]} 
-                  value={config()!["keyboard_implementation"] || "Handy Keys"}
-                  onChange={(v) => saveConfig("keyboard_implementation", v)}
-                />
-              </RefCardGroup>
             </Show>
 
             <Show when={activeSection() === "System"}>
@@ -347,7 +367,7 @@ export default function SettingsModal(props: { isOpen: boolean; onClose: () => v
                   <div style={{ display: "flex", "align-items": "center", gap: "16px" }}>
                     <MicrophoneVolume 
                       value={config()!["microphone_volume"] !== undefined ? Number(config()!["microphone_volume"]) : 75} 
-                      onChange={(val) => saveConfig("microphone_volume", val.toString())} 
+                      onChange={(val: any) => saveConfig("microphone_volume", val.toString())} 
                     />
                     <MonoValue style={{ width: "40px", "text-align": "right", color: "#2d2d2d" }}>
                       {config()!["microphone_volume"] !== undefined ? Number(config()!["microphone_volume"]) : 75}%
@@ -390,120 +410,68 @@ export default function SettingsModal(props: { isOpen: boolean; onClose: () => v
 
 // --- Styled Components (Reference Aesthetic) ---
 
-const RefModalContent = styled("div")`
-  display: flex;
-  width: 90%;
-  max-width: 900px;
-  height: 80vh;
-  max-height: 650px;
-  background: #ffffff;
-  border-radius: 12px;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
-  overflow: hidden;
-  animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  color: #2d2d2d;
-`;
+function RefModalContent(props: any) {
+  const local = props;
+  return <div class={"ref-modal-content " + (local.class || "")} {...props}>{local.children}</div>;
+}
 
-const RefSidebar = styled("div")`
-  width: 240px;
-  background-color: #f8f7f5;
-  padding: 32px 16px;
-  display: flex;
-  flex-direction: column;
-  flex-shrink: 0;
-  border-right: 1px solid #e0dfdc;
-`;
 
-const RefSidebarSection = styled("div")`
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-`;
+function RefSidebar(props: any) {
+  const local = props;
+  return <div class={"ref-sidebar " + (local.class || "")} {...props}>{local.children}</div>;
+}
 
-const RefSidebarSubhead = styled("div")`
-  font-size: 11px;
-  font-weight: 700;
-  color: #8c8b88;
-  letter-spacing: 0.5px;
-  margin-bottom: 8px;
-  padding-left: 12px;
-`;
 
-const RefSidebarItem = styled("button")`
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  background: transparent;
-  border: none;
-  text-align: left;
-  padding: 8px 12px;
-  border-radius: 6px;
-  font-size: 13.5px;
-  font-weight: 500;
-  color: #2d2d2d;
-  cursor: pointer;
-  transition: background 0.1s;
+function RefSidebarSection(props: any) {
+  const local = props;
+  return <div class={"ref-sidebar-section " + (local.class || "")} {...props}>{local.children}</div>;
+}
 
-  &:hover {
-    background: #ecebe9;
-  }
-  &.active {
-    background: #ecebe9;
-    font-weight: 600;
-  }
-`;
 
-const RefSidebarFooter = styled("div")`
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0 12px;
-  font-size: 12px;
-  color: #8c8b88;
-`;
+function RefSidebarSubhead(props: any) {
+  const local = props;
+  return <div class={"ref-sidebar-subhead " + (local.class || "")} {...props}>{local.children}</div>;
+}
 
-const RefContentArea = styled("div")`
-  flex: 1;
-  background-color: #ffffff;
-  padding: 48px;
-  overflow-y: auto;
-`;
 
-const RefTitle = styled("h1")`
-  font-family: 'Playfair Display', Georgia, serif;
-  font-size: 28px;
-  font-weight: 500;
-  color: #2d2d2d;
-  margin: 0 0 40px 0;
-`;
+function RefSidebarItem(props: any) {
+  const local = props;
+  return <button class={"ref-sidebar-item " + (local.class || "")} {...props}>{local.children}</button>;
+}
 
-const RefSectionTitle = styled("h3")`
-  font-size: 13px;
-  font-weight: 600;
-  color: #2d2d2d;
-  margin: 0 0 12px 4px;
-`;
 
-const RefCardGroup = styled("div")`
-  background: #f4f3f1;
-  border-radius: 10px;
-  display: flex;
-  flex-direction: column;
-  margin-bottom: 32px;
-  overflow: hidden;
-`;
+function RefSidebarFooter(props: any) {
+  const local = props;
+  return <div class={"ref-sidebar-footer " + (local.class || "")} {...props}>{local.children}</div>;
+}
 
-const RefCardRow = styled("div")`
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 14px 20px;
-  border-bottom: 1px solid rgba(0,0,0,0.05);
-  font-size: 14px;
-  font-weight: 500;
 
-  &:last-child {
-    border-bottom: none;
-  }
-`;
+function RefContentArea(props: any) {
+  const local = props;
+  return <div class={"ref-content-area " + (local.class || "")} {...props}>{local.children}</div>;
+}
+
+
+function RefTitle(props: any) {
+  const local = props;
+  return <h1 class={"ref-title " + (local.class || "")} {...props}>{local.children}</h1>;
+}
+
+
+function RefSectionTitle(props: any) {
+  const local = props;
+  return <h3 class={"ref-section-title " + (local.class || "")} {...props}>{local.children}</h3>;
+}
+
+
+function RefCardGroup(props: any) {
+  const local = props;
+  return <div class={"ref-card-group " + (local.class || "")} {...props}>{local.children}</div>;
+}
+
+
+function RefCardRow(props: any) {
+  const local = props;
+  return <div class={"ref-card-row " + (local.class || "")} {...props}>{local.children}</div>;
+}
+

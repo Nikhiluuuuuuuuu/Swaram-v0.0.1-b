@@ -1,0 +1,320 @@
+use natural::phonetics::soundex;
+use once_cell::sync::Lazy;
+use regex::Regex;
+use strsim::levenshtein;
+
+/// Builds an n-gram string by cleaning and concatenating words
+///
+/// Strips punctuation from each word, lowercases, and joins without spaces.
+/// This allows matching "Charge B" against "ChargeBee".
+fn build_ngram(words: &[&str]) -> String {
+    words
+        .iter()
+        .map(|w| {
+            w.trim_matches(|c: char| !c.is_alphanumeric())
+                .to_lowercase()
+        })
+        .collect::<Vec<_>>()
+        .concat()
+}
+
+/// Finds the best matching custom word for a candidate string
+///
+/// Uses Levenshtein distance and Soundex phonetic matching to find
+/// the best match above the given threshold.
+///
+/// # Arguments
+/// * `candidate` - The cleaned/lowercased candidate string to match
+/// * `custom_words` - Original custom words (for returning the replacement)
+/// * `custom_words_nospace` - Custom words with spaces removed, lowercased (for comparison)
+/// * `threshold` - Maximum similarity score to accept
+///
+/// # Returns
+/// The best matching custom word and its score, if any match was found
+fn find_best_match<'a>(
+    candidate: &str,
+    custom_words: &'a [String],
+    custom_words_nospace: &[String],
+    threshold: f64,
+) -> Option<(&'a String, f64)> {
+    if candidate.is_empty() || candidate.len() > 50 {
+        return None;
+    }
+
+    let mut best_match: Option<&String> = None;
+    let mut best_score = f64::MAX;
+
+    for (i, custom_word_nospace) in custom_words_nospace.iter().enumerate() {
+        // Skip if lengths are too different (optimization + prevents over-matching)
+        // Use percentage-based check: max 25% length difference (prevents n-grams from
+        // matching significantly shorter custom words, e.g., "openaigpt" vs "openai")
+        let len_diff = (candidate.len() as i32 - custom_word_nospace.len() as i32).abs() as f64;
+        let max_len = candidate.len().max(custom_word_nospace.len()) as f64;
+        let max_allowed_diff = (max_len * 0.25).max(2.0); // At least 2 chars difference allowed
+        if len_diff > max_allowed_diff {
+            continue;
+        }
+
+        // Calculate Levenshtein distance (normalized by length)
+        let levenshtein_dist = levenshtein(candidate, custom_word_nospace);
+        let max_len = candidate.len().max(custom_word_nospace.len()) as f64;
+        let levenshtein_score = if max_len > 0.0 {
+            levenshtein_dist as f64 / max_len
+        } else {
+            1.0
+        };
+
+        // Calculate phonetic similarity using Soundex
+        let phonetic_match = soundex(candidate, custom_word_nospace);
+
+        // Combine scores: favor phonetic matches, but also consider string similarity
+        let combined_score = if phonetic_match {
+            levenshtein_score * 0.3 // Give significant boost to phonetic matches
+        } else {
+            levenshtein_score
+        };
+
+        // Accept if the score is good enough (configurable threshold)
+        if combined_score < threshold && combined_score < best_score {
+            best_match = Some(&custom_words[i]);
+            best_score = combined_score;
+        }
+    }
+
+    best_match.map(|m| (m, best_score))
+}
+
+/// Applies custom word corrections to transcribed text using fuzzy matching
+///
+/// This function corrects words in the input text by finding the best matches
+/// from a list of custom words using a combination of:
+/// - Levenshtein distance for string similarity
+/// - Soundex phonetic matching for pronunciation similarity
+/// - N-gram matching for multi-word speech artifacts (e.g., "Charge B" -> "ChargeBee")
+///
+/// # Arguments
+/// * `text` - The input text to correct
+/// * `custom_words` - List of custom words to match against
+/// * `threshold` - Maximum similarity score to accept (0.0 = exact match, 1.0 = any match)
+///
+/// # Returns
+/// The corrected text with custom words applied
+pub fn apply_custom_words(text: &str, custom_words: &[String], threshold: f64) -> String {
+    if custom_words.is_empty() {
+        return text.to_string();
+    }
+
+    // Pre-compute lowercase versions to avoid repeated allocations
+    let custom_words_lower: Vec<String> = custom_words.iter().map(|w| w.to_lowercase()).collect();
+
+    // Pre-compute versions with spaces removed for n-gram comparison
+    let custom_words_nospace: Vec<String> = custom_words_lower
+        .iter()
+        .map(|w| w.replace(' ', ""))
+        .collect();
+
+    let words: Vec<&str> = text.split_whitespace().collect();
+    let mut result = Vec::new();
+    let mut i = 0;
+
+    while i < words.len() {
+        let mut matched = false;
+
+        // Try n-grams from longest (3) to shortest (1) - greedy matching
+        for n in (1..=3).rev() {
+            if i + n > words.len() {
+                continue;
+            }
+
+            let ngram_words = &words[i..i + n];
+            let ngram = build_ngram(ngram_words);
+
+            if let Some((replacement, _score)) =
+                find_best_match(&ngram, custom_words, &custom_words_nospace, threshold)
+            {
+                // Extract punctuation from first and last words of the n-gram
+                let (prefix, _) = extract_punctuation(ngram_words[0]);
+                let (_, suffix) = extract_punctuation(ngram_words[n - 1]);
+
+                // Preserve case from first word
+                let corrected = preserve_case_pattern(ngram_words[0], replacement);
+
+                result.push(format!("{}{}{}", prefix, corrected, suffix));
+                i += n;
+                matched = true;
+                break;
+            }
+        }
+
+        if !matched {
+            result.push(words[i].to_string());
+            i += 1;
+        }
+    }
+
+    result.join(" ")
+}
+
+/// Preserves the case pattern of the original word when applying a replacement
+fn preserve_case_pattern(original: &str, replacement: &str) -> String {
+    if original.chars().all(|c| c.is_uppercase()) {
+        replacement.to_uppercase()
+    } else if original.chars().next().map_or(false, |c| c.is_uppercase()) {
+        let mut chars: Vec<char> = replacement.chars().collect();
+        if let Some(first_char) = chars.get_mut(0) {
+            *first_char = first_char.to_uppercase().next().unwrap_or(*first_char);
+        }
+        chars.into_iter().collect()
+    } else {
+        replacement.to_string()
+    }
+}
+
+/// Extracts punctuation prefix and suffix from a word
+fn extract_punctuation(word: &str) -> (&str, &str) {
+    let prefix_end = word.chars().take_while(|c| !c.is_alphanumeric()).count();
+    let suffix_start = word
+        .char_indices()
+        .rev()
+        .take_while(|(_, c)| !c.is_alphanumeric())
+        .count();
+
+    let prefix = if prefix_end > 0 {
+        &word[..prefix_end]
+    } else {
+        ""
+    };
+
+    let suffix = if suffix_start > 0 {
+        &word[word.len() - suffix_start..]
+    } else {
+        ""
+    };
+
+    (prefix, suffix)
+}
+
+/// Returns filler words appropriate for the given language code.
+///
+/// Some words like "um" and "ha" are real words in certain languages
+/// (e.g., Portuguese "um" = "a/an", Spanish "ha" = "has"), so we only
+/// include them as fillers for languages where they are truly fillers.
+fn get_filler_words_for_language(lang: &str) -> &'static [&'static str] {
+    let base_lang = lang.split(&['-', '_'][..]).next().unwrap_or(lang);
+
+    match base_lang {
+        "en" => &[
+            "uh", "um", "uhm", "umm", "uhh", "uhhh", "ah", "hmm", "hm", "mmm", "mm", "mh", "eh",
+            "ehh", "ha",
+        ],
+        "es" => &["ehm", "mmm", "hmm", "hm"],
+        "pt" => &["ahm", "hmm", "mmm", "hm"],
+        "fr" => &["euh", "hmm", "hm", "mmm"],
+        "de" => &["äh", "ähm", "hmm", "hm", "mmm"],
+        "it" => &["ehm", "hmm", "mmm", "hm"],
+        "cs" => &["ehm", "hmm", "mmm", "hm"],
+        "pl" => &["hmm", "mmm", "hm"],
+        "tr" => &["hmm", "mmm", "hm"],
+        "ru" => &["хм", "ммм", "hmm", "mmm"],
+        "uk" => &["хм", "ммм", "hmm", "mmm"],
+        "ar" => &["hmm", "mmm"],
+        "ja" => &["hmm", "mmm"],
+        "ko" => &["hmm", "mmm"],
+        "vi" => &["hmm", "mmm", "hm"],
+        "zh" => &["hmm", "mmm"],
+        // Conservative universal fallback (no "um", "eh", "ha")
+        _ => &[
+            "uh", "uhm", "umm", "uhh", "uhhh", "ah", "hmm", "hm", "mmm", "mm", "mh", "ehh",
+        ],
+    }
+}
+
+static MULTI_SPACE_PATTERN: Lazy<Regex> = Lazy::new(|| Regex::new(r"\s{2,}").unwrap());
+
+/// Collapses repeated words (3+ repetitions) to a single instance.
+/// E.g., "wh wh wh wh" -> "wh", "I I I I" -> "I"
+fn collapse_stutters(text: &str) -> String {
+    let words: Vec<&str> = text.split_whitespace().collect();
+    if words.is_empty() {
+        return text.to_string();
+    }
+
+    let mut result: Vec<&str> = Vec::new();
+    let mut i = 0;
+
+    while i < words.len() {
+        let word = words[i];
+        let word_lower = word.to_lowercase();
+
+        if word_lower.chars().all(|c| c.is_alphabetic()) {
+            // Count consecutive repetitions (case-insensitive)
+            let mut count = 1;
+            while i + count < words.len() && words[i + count].to_lowercase() == word_lower {
+                count += 1;
+            }
+
+            // If 3+ repetitions, collapse to single instance
+            if count >= 3 {
+                result.push(word);
+                i += count;
+            } else {
+                result.push(word);
+                i += 1;
+            }
+        } else {
+            result.push(word);
+            i += 1;
+        }
+    }
+
+    result.join(" ")
+}
+
+/// Filters transcription output by removing filler words and stutter artifacts.
+///
+/// This function cleans up raw transcription text by:
+/// 1. Removing filler words based on the app language (or custom list)
+/// 2. Collapsing repeated word stutters (e.g., "wh wh wh" -> "wh")
+/// 3. Cleaning up excess whitespace
+///
+/// # Arguments
+/// * `text` - The raw transcription text to filter
+/// * `lang` - The app language code (e.g., "en", "pt-BR") used to select filler words
+/// * `custom_filler_words` - Optional user-provided filler word list. `Some(vec)` overrides
+///   language defaults; `Some(empty vec)` disables filtering; `None` uses language defaults.
+///
+/// # Returns
+/// The filtered text with filler words and stutters removed
+pub fn filter_transcription_output(
+    text: &str,
+    lang: &str,
+    custom_filler_words: &Option<Vec<String>>,
+) -> String {
+    let mut filtered = text.to_string();
+
+    // Build filler patterns from custom list or language defaults
+    let patterns: Vec<Regex> = match custom_filler_words {
+        Some(words) => words
+            .iter()
+            .filter_map(|word| Regex::new(&format!(r"(?i)\b{}\b[,.]?", regex::escape(word))).ok())
+            .collect(),
+        None => get_filler_words_for_language(lang)
+            .iter()
+            .map(|word| Regex::new(&format!(r"(?i)\b{}\b[,.]?", regex::escape(word))).unwrap())
+            .collect(),
+    };
+
+    // Remove filler words
+    for pattern in &patterns {
+        filtered = pattern.replace_all(&filtered, "").to_string();
+    }
+
+    // Collapse repeated 1-2 letter words (stutter artifacts like "wh wh wh wh")
+    filtered = collapse_stutters(&filtered);
+
+    // Clean up multiple spaces to single space
+    filtered = MULTI_SPACE_PATTERN.replace_all(&filtered, " ").to_string();
+
+    // Trim leading/trailing whitespace
+    filtered.trim().to_string()
+}

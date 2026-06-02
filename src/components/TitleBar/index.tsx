@@ -1,89 +1,9 @@
-import { styled } from "solid-styled-components";
+
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ArrowLeft } from "lucide-solid";
 import { Show } from "solid-js";
 
-const TitleBarContainer = styled("div")`
-  position: relative;
-  height: 40px;
-  background: var(--alabaster-base);
-  user-select: none;
-  display: flex;
-  align-items: center;
-  flex-shrink: 0;
-  flex-direction: row;
-  z-index: 9999;
-  justify-content: space-between;
-`;
-
-const TitleBarDragRegion = styled("div")`
-  flex: 1;
-  height: 100%;
-  display: flex;
-  align-items: center;
-`;
-
-
-
-const NavContainer = styled("div")`
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  height: 100%;
-`;
-
-const BackButton = styled("button")`
-  background: none;
-  border: none;
-  color: var(--ink-muted);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 4px;
-  border-radius: 4px;
-  transition: all 0.2s;
-
-  &:hover {
-    background: rgba(var(--hover-rgb), 0.05);
-    color: var(--ink);
-  }
-`;
-
-const TabLabel = styled("span")`
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--ink-muted);
-`;
-
-const ControlsWrapper = styled("div")`
-  display: flex;
-  height: 100%;
-`;
-
-const ControlButton = styled("div")`
-  display: inline-flex;
-  justify-content: center;
-  align-items: center;
-  cursor: pointer;
-  transition: all var(--transition) 0.2s;
-  width: 48px;
-  height: 100%;
-  color: var(--ink-muted);
-  
-  &:hover {
-    background-color: rgba(var(--hover-rgb), 0.05);
-    color: var(--ink);
-  }
-  &.close:hover {
-    background-color: #ef4444;
-    color: white;
-  }
-  
-  svg {
-    pointer-events: none;
-  }
-`;
+// removed styled definitions
 
 interface TitleBarProps {
   searchQuery?: string;
@@ -91,44 +11,49 @@ interface TitleBarProps {
   activeTabLabel?: string;
   canGoBack?: boolean;
   onBack?: () => void;
+  centerContent?: import("solid-js").JSX.Element;
 }
 
 export default function TitleBar(props: TitleBarProps) {
   const appWindow = getCurrentWindow();
 
   return (
-    <TitleBarContainer>
-      <TitleBarDragRegion data-tauri-drag-region="true" style={{ "justify-content": "flex-start", "padding-left": "16px" }}>
-        <NavContainer>
+    <div class="title-bar-container">
+      <div class="title-bar-drag-region" data-tauri-drag-region="true" style={{ "flex": 1, "justify-content": "flex-start", "padding-left": "16px" }}>
+        <div class="nav-container">
           <Show when={props.canGoBack}>
-            <BackButton onClick={() => props.onBack?.()} title="Go Back">
+            <button class="back-button" onClick={() => props.onBack?.()} title="Go Back">
               <ArrowLeft size={14} />
-            </BackButton>
+            </button>
           </Show>
-          <TabLabel>{props.activeTabLabel || ""}</TabLabel>
-        </NavContainer>
-      </TitleBarDragRegion>
+          <span class="tab-label">{props.activeTabLabel || ""}</span>
+        </div>
+      </div>
       
-      <TitleBarDragRegion data-tauri-drag-region="true" style={{ "flex": 1, "justify-content": "center" }} />
-      <TitleBarDragRegion data-tauri-drag-region="true" style={{ "justify-content": "flex-end" }} />
+      <Show when={props.centerContent}>
+        <div class="center-content-wrapper">
+          <div data-tauri-drag-region="true" style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", "z-index": -1 }} />
+          {props.centerContent}
+        </div>
+      </Show>
 
-      <ControlsWrapper>
-        <ControlButton class="minimize" onClick={() => appWindow.minimize()}>
+      <div class="controls-wrapper">
+        <div class="control-button minimize" onClick={() => appWindow.minimize()}>
           <svg width="10" height="10" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M1 5H9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
           </svg>
-        </ControlButton>
-        <ControlButton class="maximize" onClick={() => appWindow.toggleMaximize()}>
+        </div>
+        <div class="control-button maximize" onClick={() => appWindow.toggleMaximize()}>
           <svg width="10" height="10" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg">
             <rect x="1.5" y="1.5" width="7" height="7" stroke="currentColor" stroke-width="1.5" rx="1"/>
           </svg>
-        </ControlButton>
-        <ControlButton class="close" onClick={() => appWindow.close()}>
+        </div>
+        <div class="control-button close" onClick={() => appWindow.close()}>
           <svg width="10" height="10" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M2 2L8 8M8 2L2 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
           </svg>
-        </ControlButton>
-      </ControlsWrapper>
-    </TitleBarContainer>
+        </div>
+      </div>
+    </div>
   );
 }

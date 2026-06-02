@@ -1,9 +1,7 @@
 pub mod audio;
 pub mod config;
-pub mod models;
+pub mod crud_commands;
+pub mod dictation;
 pub mod hardware;
 pub mod history;
-pub mod dictionary;
-pub mod snippets;
-pub mod modes;
-pub mod tones;
+pub mod models;

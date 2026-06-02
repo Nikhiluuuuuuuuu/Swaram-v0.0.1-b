@@ -1,5 +1,5 @@
-use tauri::command;
 use serde::{Deserialize, Serialize};
+use tauri::command;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct HardwareOptions {
@@ -10,27 +10,34 @@ pub struct HardwareOptions {
 #[command]
 pub async fn get_hardware_options() -> Result<HardwareOptions, String> {
     let mut whisper_acceleration = vec!["Auto".to_string()];
-    let onnx_acceleration = vec!["Auto".to_string(), "CPU".to_string(), "DirectML".to_string()];
-    
+    let onnx_acceleration = vec![
+        "Auto".to_string(),
+        "CPU".to_string(),
+        "DirectML".to_string(),
+    ];
+
     // Create wgpu instance to detect hardware GPUs
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
         backends: wgpu::Backends::all(),
         ..Default::default()
     });
-    
-    let mut gpus = Vec::new();
-    for adapter in instance.enumerate_adapters(wgpu::Backends::all()) {
+
+    // Use request_adapter as a fallback since enumerate_adapters may not be available
+    if let Some(adapter) = instance
+        .request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            ..Default::default()
+        })
+        .await
+    {
         let info = adapter.get_info();
-        if !gpus.contains(&info.name) {
-            gpus.push(info.name);
+        if !whisper_acceleration.contains(&info.name) {
+            whisper_acceleration.push(info.name);
         }
     }
-    
-    for gpu in gpus {
-        whisper_acceleration.push(gpu);
-    }
+
     whisper_acceleration.push("CPU".to_string());
-    
+
     Ok(HardwareOptions {
         whisper_acceleration,
         onnx_acceleration,

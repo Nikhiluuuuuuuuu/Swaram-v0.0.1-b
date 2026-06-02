@@ -60,8 +60,8 @@ export default function GenericConfigTab(props: GenericConfigTabProps) {
   const openEdit = (entry: GenericEntry) => {
     setModalMode("edit");
     setCurrentId(entry.id);
-    setF1(entry[props.f1Key] || "");
-    setF2(entry[props.f2Key] || "");
+    setF1(String(entry[props.f1Key] ?? ""));
+    setF2(String(entry[props.f2Key] ?? ""));
     setIsModalOpen(true);
   };
 
@@ -224,7 +224,7 @@ export default function GenericConfigTab(props: GenericConfigTabProps) {
 
       {/* Modal for All Layouts */}
       <Show when={isModalOpen()}>
-        <ModalOverlay onClick={(e) => {
+        <ModalOverlay onClick={(e: any) => {
           if (e.target === e.currentTarget) closeEdit();
         }}>
           <SplitModalContent>
@@ -247,7 +247,7 @@ export default function GenericConfigTab(props: GenericConfigTabProps) {
                 <Input 
                   type="text" 
                   value={f1()} 
-                  onInput={(e) => setF1(e.currentTarget.value)} 
+                  onInput={(e: any) => setF1(e.currentTarget.value)} 
                   placeholder={`e.g. ${props.title.toLowerCase().slice(0, -1)} name`}
                 />
               </FormGroup>
@@ -258,13 +258,13 @@ export default function GenericConfigTab(props: GenericConfigTabProps) {
                   <Input 
                     type="text" 
                     value={f2()} 
-                    onInput={(e) => setF2(e.currentTarget.value)} 
+                    onInput={(e: any) => setF2(e.currentTarget.value)} 
                     placeholder={props.f2Placeholder}
                   />
                 ) : (
                   <AutoResizeTextArea 
                     value={f2()} 
-                    onInput={(e) => setF2(e.currentTarget.value)} 
+                    onInput={(e: any) => setF2(e.currentTarget.value)} 
                     placeholder={props.f2Placeholder}
                     style={{ "min-height": "160px" }}
                   />
