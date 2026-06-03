@@ -108,6 +108,23 @@ fn create_client(provider: &PostProcessProvider, api_key: &str) -> Result<reqwes
         .map_err(|e| format!("Failed to build HTTP client: {}", e))
 }
 
+/// Check if the LLM provider is available by pinging the models endpoint
+pub async fn is_llm_available(provider: &PostProcessProvider, api_key: &str) -> bool {
+    let base_url = provider.base_url.trim_end_matches('/');
+    let url = format!("{}/models", base_url);
+    
+    if let Ok(client) = create_client(provider, api_key) {
+        if let Ok(response) = client.get(&url)
+            .timeout(std::time::Duration::from_secs(3))
+            .send()
+            .await 
+        {
+            return response.status().is_success();
+        }
+    }
+    false
+}
+
 /// Send a chat completion request to an OpenAI-compatible API
 /// Returns Ok(Some(content)) on success, Ok(None) if response has no content,
 /// or Err on actual errors (HTTP, parsing, etc.)

@@ -4,11 +4,6 @@ use std::sync::Once;
 use std::time::Instant;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
-const MIN_TRANSCRIPTION_CHARS: usize = 2;
-const MIN_CONTENT_WORDS_FOR_ARTICLE: usize = 2;
-const LOW_INFORMATION_WORDS: &[&str] = &[
-    "a", "an", "the", "and", "or", "you", "i", "uh", "um", "hmm", "mmm",
-];
 static WHISPER_LOG_HOOK: Once = Once::new();
 
 pub struct WhisperEngine {
@@ -27,38 +22,6 @@ impl WhisperEngine {
             context: None,
         }
     }
-}
-
-fn is_probable_hallucination(text: &str) -> bool {
-    let trimmed = text.trim();
-    if trimmed.len() < MIN_TRANSCRIPTION_CHARS {
-        return true;
-    }
-
-    let mut word_count = 0;
-    let mut first_word = String::new();
-
-    for word in trimmed.split_whitespace() {
-        let cleaned = word
-            .trim_matches(|c: char| !c.is_alphanumeric())
-            .to_ascii_lowercase();
-
-        if cleaned.is_empty() {
-            continue;
-        }
-
-        if word_count == 0 {
-            first_word = cleaned;
-        }
-        word_count += 1;
-    }
-
-    if word_count == 0 {
-        return true;
-    }
-
-    word_count < MIN_CONTENT_WORDS_FOR_ARTICLE
-        && LOW_INFORMATION_WORDS.contains(&first_word.as_str())
 }
 
 impl TranscriberEngine for WhisperEngine {
@@ -122,8 +85,6 @@ impl TranscriberEngine for WhisperEngine {
 
         let num_segments = state.full_n_segments();
         let mut transcription = String::new();
-        let mut content_token_count = 0;
-        let mut token_probability_sum = 0.0_f32;
 
         for i in 0..num_segments {
             if let Some(segment) = state.get_segment(i) {
@@ -133,50 +94,10 @@ impl TranscriberEngine for WhisperEngine {
                     }
                     Err(e) => eprintln!("Failed to decode segment: {}", e),
                 }
-
-                for token_idx in 0..segment.n_tokens() {
-                    if let Some(token) = segment.get_token(token_idx) {
-                        if token.token_id() < 50_000 {
-                            content_token_count += 1;
-                            token_probability_sum += token.token_probability();
-                        }
-                    }
-                }
             }
         }
 
-        let mut cleaned = transcription.trim().to_string();
-
-        if cleaned.starts_with('[') && cleaned.ends_with(']') {
-            cleaned.clear();
-        }
-        if cleaned.starts_with('(') && cleaned.ends_with(')') {
-            cleaned.clear();
-        }
-        if cleaned.starts_with('*') && cleaned.ends_with('*') {
-            cleaned.clear();
-        }
-
-        cleaned = crate::system::text_filters::filter_transcription_output(&cleaned, "en", &None);
-
-        if is_probable_hallucination(&cleaned) {
-            eprintln!(
-                "Rejected low-information Whisper output: {:?} (content_tokens={})",
-                cleaned, content_token_count
-            );
-            return Ok(String::new());
-        }
-
-        if content_token_count > 0 {
-            let avg_token_probability = token_probability_sum / content_token_count as f32;
-            if avg_token_probability < 0.20 {
-                eprintln!(
-                    "Rejected low-confidence Whisper output: {:?} (avg_token_probability={:.3})",
-                    cleaned, avg_token_probability
-                );
-                return Ok(String::new());
-            }
-        }
+        let cleaned = transcription.trim().to_string();
 
         Ok(cleaned)
     }
@@ -198,19 +119,3 @@ impl TranscriberEngine for WhisperEngine {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::is_probable_hallucination;
-
-    #[test]
-    fn rejects_single_low_information_words() {
-        assert!(is_probable_hallucination("the"));
-        assert!(is_probable_hallucination(" um "));
-    }
-
-    #[test]
-    fn keeps_short_meaningful_dictation() {
-        assert!(!is_probable_hallucination("yes"));
-        assert!(!is_probable_hallucination("open settings"));
-    }
-}

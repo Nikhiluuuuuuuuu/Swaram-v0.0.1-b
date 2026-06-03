@@ -1,4 +1,4 @@
-use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize};
+use tauri::{AppHandle, Manager};
 
 #[cfg(target_os = "windows")]
 use windows::Win32::{
@@ -42,6 +42,7 @@ pub fn update_pill_region(app: AppHandle, width: f64, height: f64) {
 
             #[cfg(not(target_os = "windows"))]
             {
+                use tauri::{PhysicalPosition, PhysicalSize};
                 let _ = window.set_size(PhysicalSize::new(physical_width, physical_height));
                 let _ = window.set_position(PhysicalPosition::new(x, y));
             }

@@ -243,23 +243,27 @@ pub async fn stop_dictation(
                             base_url: llm_base_url,
                         };
                         
-                        match crate::system::llm_post_process::send_chat_completion_with_schema(
-                            &provider,
-                            llm_api_key,
-                            &llm_model,
-                            final_transcription.clone(),
-                            Some(system_prompt),
-                            None,
-                            None,
-                            None
-                        ).await {
-                            Ok(Some(processed_text)) => {
-                                final_transcription = processed_text;
+                        if crate::system::llm_post_process::is_llm_available(&provider, &llm_api_key).await {
+                            match crate::system::llm_post_process::send_chat_completion_with_schema(
+                                &provider,
+                                llm_api_key,
+                                &llm_model,
+                                final_transcription.clone(),
+                                Some(system_prompt),
+                                None,
+                                None,
+                                None
+                            ).await {
+                                Ok(Some(processed_text)) => {
+                                    final_transcription = processed_text;
+                                }
+                                Ok(None) => {}
+                                Err(e) => {
+                                    eprintln!("LLM Post-processing failed: {}", e);
+                                }
                             }
-                            Ok(None) => {}
-                            Err(e) => {
-                                eprintln!("LLM Post-processing failed: {}", e);
-                            }
+                        } else {
+                            eprintln!("LLM provider is not available, skipping post-processing to avoid delay.");
                         }
                     }
                 }
