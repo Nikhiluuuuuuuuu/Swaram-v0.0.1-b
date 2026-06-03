@@ -313,8 +313,7 @@ export default function ModelsTab(props: { searchQuery?: string; activeView?: "m
       console.error("Failed to load model into memory", e);
     }
   };
-
-  return (
+  return (
     <TabContainer>
       <Title>MODELS CONFIGURATION</Title>
       <Description>Search and download speech-to-text models directly from Hugging Face.</Description>
@@ -334,6 +333,21 @@ export default function ModelsTab(props: { searchQuery?: string; activeView?: "m
         </div>
         <PrimaryButton onClick={handleSearch}>Search</PrimaryButton>
       </SearchContainer>
+      
+      <div style={{ "display": "flex", "gap": "8px", "margin-bottom": "16px" }}>
+        <button 
+          onClick={() => { setLocalSearch("whisper ggml"); handleSearch(); }}
+          style={{ "padding": "4px 12px", "border-radius": "16px", "background": "var(--bg-secondary)", "border": "1px solid var(--border-color)", "font-size": "12px", "cursor": "pointer" }}
+        >
+          Whisper Models
+        </button>
+        <button 
+          onClick={() => { setLocalSearch("sherpa-onnx parakeet"); handleSearch(); }}
+          style={{ "padding": "4px 12px", "border-radius": "16px", "background": "var(--bg-secondary)", "border": "1px solid var(--border-color)", "font-size": "12px", "cursor": "pointer" }}
+        >
+          Parakeet / Sherpa
+        </button>
+      </div>
 
       <Show when={!loading()} fallback={
         <RegistryList>

@@ -15,6 +15,5 @@ if (import.meta.env.DEV && !(root instanceof HTMLElement)) {
 document.addEventListener("contextmenu", (e) => e.preventDefault());
 
 render(() => (
-  <Router root={App}>
-  </Router>
+  <Router root={App} />
 ), root!);

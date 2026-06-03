@@ -20,10 +20,31 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_log::Builder::new().build())
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
                 let _ = window.set_focus();
+            }
+            for arg in args {
+                if arg == "--toggle-transcription" {
+                    let app_handle = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let state = app_handle.state::<crate::system::dictation::DictationState>();
+                        let _ = crate::commands::dictation::toggle_dictation(app_handle.clone(), state).await;
+                    });
+                } else if arg == "--start-transcription" {
+                    let app_handle = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let state = app_handle.state::<crate::system::dictation::DictationState>();
+                        let _ = crate::commands::dictation::start_dictation(app_handle.clone(), state).await;
+                    });
+                } else if arg == "--stop-transcription" {
+                    let app_handle = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let state = app_handle.state::<crate::system::dictation::DictationState>();
+                        let _ = crate::commands::dictation::stop_dictation(app_handle.clone(), state).await;
+                    });
+                }
             }
         }))
         .plugin(tauri_plugin_shell::init())

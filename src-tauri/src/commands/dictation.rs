@@ -10,9 +10,6 @@ struct TranscriptionResult {
 }
 
 const TARGET_SAMPLE_RATE: u32 = 16_000;
-const VAD_FRAME_MS: usize = 30;
-const VAD_FRAME_SAMPLES: usize = (TARGET_SAMPLE_RATE as usize * VAD_FRAME_MS) / 1000;
-const VAD_PADDING_FRAMES: usize = 5;
 const MIN_VOICED_AUDIO_MS: usize = 240;
 const MIN_AUDIO_RMS: f32 = 0.008;
 const SAVE_RECORDINGS_CONFIG_KEY: &str = "save_recordings";
@@ -56,49 +53,52 @@ fn should_save_recordings(app: &AppHandle) -> bool {
 }
 
 fn compact_voiced_audio(audio: &[f32]) -> Vec<f32> {
-    if audio.len() < VAD_FRAME_SAMPLES {
+    if audio.is_empty() {
         return Vec::new();
     }
 
-    let rate = webrtc_vad::SampleRate::Rate16kHz;
-    let mut vad =
-        webrtc_vad::Vad::new_with_rate_and_mode(rate, webrtc_vad::VadMode::VeryAggressive);
-    let mut ranges: Vec<(usize, usize)> = Vec::new();
-    let mut frame = [0_i16; VAD_FRAME_SAMPLES];
+    let config = silero_vad::VadConfig::new(TARGET_SAMPLE_RATE as usize);
+    let mut session = match silero_vad::VadSession::new(config) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Failed to load Silero VAD session: {}", e);
+            return audio.to_vec();
+        }
+    };
 
-    for (frame_index, chunk) in audio.chunks_exact(VAD_FRAME_SAMPLES).enumerate() {
-        for (dst, &sample) in frame.iter_mut().zip(chunk) {
-            *dst = (sample.clamp(-1.0, 1.0) * i16::MAX as f32) as i16;
+    let chunk_size = 512; // 32ms at 16kHz
+    let mut voice_only = Vec::with_capacity(audio.len());
+    
+    // Configurable padding to capture trailing consonants (e.g., 15 chunks = 480ms)
+    let padding_chunks = 15;
+    let mut padding_countdown = 0;
+
+    for chunk in audio.chunks(chunk_size) {
+        let mut process_chunk = chunk.to_vec();
+        // Pad the last chunk with zeros if it's smaller than 512
+        if process_chunk.len() < chunk_size {
+            process_chunk.resize(chunk_size, 0.0);
         }
 
-        if vad.is_voice_segment(&frame).unwrap_or(false) {
-            let start_frame = frame_index.saturating_sub(VAD_PADDING_FRAMES);
-            let end_frame = frame_index + VAD_PADDING_FRAMES + 1;
-            let start = start_frame * VAD_FRAME_SAMPLES;
-            let end = (end_frame * VAD_FRAME_SAMPLES).min(audio.len());
-
-            if let Some((_, previous_end)) = ranges.last_mut() {
-                if start <= *previous_end {
-                    *previous_end = (*previous_end).max(end);
-                    continue;
-                }
+        let is_speech = match session.process(&process_chunk) {
+            Ok(_) => session.is_speaking(),
+            Err(e) => {
+                eprintln!("VAD processing error: {}", e);
+                false
             }
+        };
 
-            ranges.push((start, end));
+        if is_speech {
+            voice_only.extend_from_slice(chunk);
+            padding_countdown = padding_chunks;
+        } else if padding_countdown > 0 {
+            voice_only.extend_from_slice(chunk);
+            padding_countdown -= 1;
         }
     }
 
-    let capacity = ranges
-        .iter()
-        .map(|(start, end)| end.saturating_sub(*start))
-        .sum();
-    let mut filtered = Vec::with_capacity(capacity);
-
-    for (start, end) in ranges {
-        filtered.extend_from_slice(&audio[start..end]);
-    }
-
-    filtered
+    voice_only.shrink_to_fit();
+    voice_only
 }
 
 #[command]
@@ -203,16 +203,80 @@ pub async fn stop_dictation(
     })?;
 
     if !transcription.is_empty() {
+        let app_dir = app
+            .path()
+            .app_data_dir()
+            .unwrap_or_else(|_| std::path::PathBuf::from("."));
+
+        let mut final_transcription = transcription.clone();
+
+        // LLM Post-Processing (Tones & Modes)
+        if let Ok(db) = crate::database::Database::new(&app_dir) {
+            if let Ok(config) = db.get_all_config() {
+                let active_mode_id = config.get("active_mode").and_then(|id| id.parse::<i64>().ok());
+                let active_tone_id = config.get("active_tone").and_then(|id| id.parse::<i64>().ok());
+                let llm_api_key = config.get("llm_api_key").cloned().unwrap_or_default();
+                let llm_provider = config.get("llm_provider").cloned().unwrap_or_else(|| "openai".to_string());
+                let llm_model = config.get("llm_model").cloned().unwrap_or_else(|| "gpt-4o".to_string());
+                let llm_base_url = config.get("llm_base_url").cloned().unwrap_or_else(|| "https://api.openai.com/v1".to_string());
+
+                if !llm_api_key.is_empty() && (active_mode_id.is_some() || active_tone_id.is_some()) {
+                    let mut system_prompt = String::new();
+                    if let Some(id) = active_mode_id {
+                        if let Ok(modes) = db.get_modes() {
+                            if let Some(mode) = modes.into_iter().find(|m| m.id == id) {
+                                system_prompt.push_str(&format!("Apply this mode to the text: {}\n", mode.prompt));
+                            }
+                        }
+                    }
+                    if let Some(id) = active_tone_id {
+                        if let Ok(tones) = db.get_tones() {
+                            if let Some(tone) = tones.into_iter().find(|t| t.id == id) {
+                                system_prompt.push_str(&format!("Apply this tone to the text: {}\n", tone.prompt));
+                            }
+                        }
+                    }
+
+                    if !system_prompt.is_empty() {
+                        let provider = crate::system::llm_post_process::PostProcessProvider {
+                            id: llm_provider,
+                            base_url: llm_base_url,
+                        };
+                        
+                        match crate::system::llm_post_process::send_chat_completion_with_schema(
+                            &provider,
+                            llm_api_key,
+                            &llm_model,
+                            final_transcription.clone(),
+                            Some(system_prompt),
+                            None,
+                            None,
+                            None
+                        ).await {
+                            Ok(Some(processed_text)) => {
+                                final_transcription = processed_text;
+                            }
+                            Ok(None) => {}
+                            Err(e) => {
+                                eprintln!("LLM Post-processing failed: {}", e);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         let _ = app.emit(
             "transcription-result",
             TranscriptionResult {
-                text: transcription.clone(),
+                text: final_transcription.clone(),
             },
         );
-        if let Err(e) = insert_text(&transcription, &app) {
+        if let Err(e) = insert_text(&final_transcription, &app) {
             eprintln!("Failed to insert text: {}", e);
             let _ = app.emit("dictation-error", format!("Failed to insert text: {}", e));
         }
+
 
         let app_dir = app
             .path()
@@ -252,7 +316,7 @@ pub async fn stop_dictation(
 
         if let Ok(db) = crate::database::Database::new(&app_dir) {
             if let Err(e) = db.add_history_entry(
-                &transcription,
+                &final_transcription,
                 &timestamp_sec,
                 Some(&duration_str),
                 None,

@@ -180,6 +180,29 @@ export default function DashboardTab(props: { searchQuery?: string }) {
     return num >= 1000 ? (num / 1000).toFixed(1) + 'K' : num.toString();
   };
 
+  const fetchModes = async () => await invoke<any[]>("get_modes");
+  const fetchTones = async () => await invoke<any[]>("get_tones");
+  const fetchConfig = async () => await invoke<Record<string, string>>("get_all_config");
+
+  const [modes] = createResource(fetchModes);
+  const [tones] = createResource(fetchTones);
+  const [config, { mutate: mutateConfig }] = createResource(fetchConfig);
+
+  const activeMode = () => config()?.active_mode || "";
+  const activeTone = () => config()?.active_tone || "";
+
+  const handleModeChange = async (e: any) => {
+    const val = e.target.value;
+    await invoke("save_config", { key: "active_mode", value: val });
+    if (config()) mutateConfig({ ...config()!, active_mode: val });
+  };
+
+  const handleToneChange = async (e: any) => {
+    const val = e.target.value;
+    await invoke("save_config", { key: "active_tone", value: val });
+    if (config()) mutateConfig({ ...config()!, active_tone: val });
+  };
+
   return (
     <TabContainer style={{ padding: "0" }}>
       <DashboardLayout>
@@ -249,6 +272,34 @@ export default function DashboardTab(props: { searchQuery?: string }) {
         </MainColumn>
 
         <StatsColumn>
+          <StatsWindow style={{ "margin-bottom": "24px" }}>
+            <h3 style={{ "margin": "0 0 12px 0", "font-size": "14px", "color": "var(--text-secondary)" }}>LLM Post-Processing</h3>
+            <div style={{ "display": "flex", "flex-direction": "column", "gap": "12px" }}>
+              <div style={{ "display": "flex", "flex-direction": "column", "gap": "4px" }}>
+                <label style={{ "font-size": "12px", "color": "var(--text-secondary)" }}>Active Mode</label>
+                <select 
+                  value={activeMode()} 
+                  onChange={handleModeChange}
+                  style={{ "padding": "8px", "border-radius": "8px", "background": "var(--bg-secondary)", "border": "1px solid var(--border-color)", "color": "var(--text-primary)" }}
+                >
+                  <option value="">None</option>
+                  <For each={modes()}>{(m) => <option value={m.id.toString()}>{m.name}</option>}</For>
+                </select>
+              </div>
+              <div style={{ "display": "flex", "flex-direction": "column", "gap": "4px" }}>
+                <label style={{ "font-size": "12px", "color": "var(--text-secondary)" }}>Active Tone</label>
+                <select 
+                  value={activeTone()} 
+                  onChange={handleToneChange}
+                  style={{ "padding": "8px", "border-radius": "8px", "background": "var(--bg-secondary)", "border": "1px solid var(--border-color)", "color": "var(--text-primary)" }}
+                >
+                  <option value="">None</option>
+                  <For each={tones()}>{(t) => <option value={t.id.toString()}>{t.name}</option>}</For>
+                </select>
+              </div>
+            </div>
+          </StatsWindow>
+
           <StatsWindow>
             <StatBlock>
               <StatNum>{formatNum(statsByModel().totalWords)}</StatNum>
